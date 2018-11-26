@@ -10,6 +10,7 @@ WORKDIR /go/src/github.com/instana/dispatch
 RUN curl -fsSL -o /usr/local/bin/dep ${DEP_URL} && \
 	chmod +x /usr/local/bin/dep && \
     dep ensure && \
+		go get go.elastic.co/apm && \
     go build -o bin/gorcv
 
 # @todo stage this build

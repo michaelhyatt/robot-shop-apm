@@ -5,14 +5,9 @@ import (
     "log"
     "time"
     "os"
-    "math/rand"
     "strconv"
 
     "github.com/streadway/amqp"
-    "github.com/instana/golang-sensor"
-    ot "github.com/opentracing/opentracing-go"
-    ext "github.com/opentracing/opentracing-go/ext"
-    otlog "github.com/opentracing/opentracing-go/log"
 )
 
 const (
@@ -81,46 +76,7 @@ func failOnError(err error, msg string) {
     }
 }
 
-func createSpan(headers map[string]interface{}) {
-    // headers is map[string]interface{}
-    // carrier is map[string]string
-    carrier := make(ot.TextMapCarrier)
-    // convert by copying k, v
-    for k, v := range headers {
-        carrier[k] = v.(string)
-    }
-
-    // opentracing
-    var span ot.Span
-    tracer := ot.GlobalTracer()
-    spanContext, err := tracer.Extract(ot.HTTPHeaders, carrier)
-    if err == nil {
-        log.Println("Creating span")
-        // create span
-        span = tracer.StartSpan("dispatch", ot.ChildOf(spanContext), ext.SpanKindConsumer)
-        ext.MessageBusDestination.Set(span, "orders")
-        ext.Component.Set(span, "dispatch")
-        defer span.Finish()
-        time.Sleep(time.Duration(42 + rand.Int63n(42)) * time.Millisecond)
-        if rand.Intn(100) < errorPercent {
-            span.SetTag("error", true)
-            span.LogFields(
-                otlog.String("error.kind", "Exception"),
-                otlog.String("message", "Failed to dispatch to SOP"))
-                log.Println("Span tagged with error")
-        }
-    } else {
-        log.Println("Failed to get span context")
-        log.Println(err)
-    }
-}
-
-
 func main() {
-    // Instana tracing
-    ot.InitGlobalTracer(instana.NewTracerWithOptions(&instana.Options{
-        Service: Service,
-        LogLevel: instana.Info}))
 
     // Init amqpUri
     // get host from environment
@@ -170,7 +126,6 @@ func main() {
             for d := range msgs {
                 log.Printf("Order %s\n", d.Body)
                 log.Printf("Headers %v\n", d.Headers)
-                go createSpan(d.Headers)
             }
         }
     }()
