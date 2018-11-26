@@ -1,11 +1,14 @@
-const instana = require('instana-nodejs-sensor');
-// init tracing
-// MUST be done before loading anything else!
-instana({
-    tracing: {
-        enabled: true
-    }
-});
+// const instana = require('instana-nodejs-sensor');
+// // init tracing
+// // MUST be done before loading anything else!
+// instana({
+//     tracing: {
+//         enabled: true
+//     }
+// });
+
+// init Elastic Apm
+var apm = require('elastic-apm-node/start')
 
 const mongoClient = require('mongodb').MongoClient;
 const mongoObjectID = require('mongodb').ObjectID;

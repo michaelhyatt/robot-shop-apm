@@ -9,6 +9,7 @@
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
+        <elastic-apm.version>1.0.1</elastic-apm.version>
     </properties>
 
     <dependencies>
@@ -46,6 +47,11 @@
             <groupId>org.apache.httpcomponents</groupId>
             <artifactId>httpclient</artifactId>
             <version>4.5.5</version>
+        </dependency>
+        <dependency>
+            <groupId>co.elastic.apm</groupId>
+            <artifactId>apm-agent-api</artifactId>
+            <version>${elastic-apm.version}</version>
         </dependency>
     </dependencies>
 

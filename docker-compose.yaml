@@ -26,18 +26,26 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
+
   catalogue:
     build:
       context: catalogue
     image: ${REPO}/rs-catalogue:${TAG}
     depends_on:
       - mongodb
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+    environment:
+      - ELASTIC_APM_SERVICE_NAME=catalogue-nodejs
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_LOG_LEVEL=debug
+      - ELASTIC_APM_ACTIVE=true
+
   user:
     build:
       context: user
@@ -45,24 +53,38 @@ services:
     depends_on:
       - mongodb
       - redis
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+    environment:
+      - ELASTIC_APM_SERVICE_NAME=user-nodejs
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_LOG_LEVEL=debug
+      - ELASTIC_APM_ACTIVE=true
+
   cart:
     build:
       context: cart
     image: ${REPO}/rs-cart:${TAG}
     depends_on:
       - redis
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+    environment:
+      - ELASTIC_APM_SERVICE_NAME=cart-nodejs
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_LOG_LEVEL=debug
+      - ELASTIC_APM_ACTIVE=true
+
   mysql:
     build:
       context: mysql
@@ -75,18 +97,27 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
+
   shipping:
     build:
       context: shipping
     image: ${REPO}/rs-shipping:${TAG}
     depends_on:
       - mysql
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+    # environment:
+      # - ELASTIC_APM_SERVICE_NAME=shipping-java
+      # - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_LOG_LEVEL=debug
+      # - ELASTIC_APM_APPLICATION_PACKAGES=org.steveww.spark
+      # - ELASTIC_APM_ACTIVE=true
+
   ratings:
     build:
       context: ratings
@@ -95,34 +126,40 @@ services:
       - robot-shop
     depends_on:
       - mysql
+      - apm-server
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+
   payment:
     build:
       context: payment
     image: ${REPO}/rs-payment:${TAG}
     depends_on:
       - rabbitmq
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+
   dispatch:
     build:
       context: dispatch
     image: ${REPO}/rs-dispatch:${TAG}
     depends_on:
       - rabbitmq
+      - apm-server
     networks:
       - robot-shop
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
+
   web:
     build:
       context: web
@@ -140,10 +177,30 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
+
+  # ELK stack
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_TAG}
+    container_name: elasticsearch
+    ports: ['9200:9200']
+    networks: ['robot-shop']
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELK_TAG}
+    container_name: kibana
+    ports: ['5601:5601']
+    networks: ['robot-shop']
+    depends_on: ['elasticsearch']
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:${ELK_TAG}
+    container_name: apm_server
+    ports: ['8200:8200']
+    networks: ['robot-shop']
+    command: --strict.perms=false -e  # -e flag to log to stderr and disable syslog/file output
+    depends_on: ['elasticsearch', 'kibana']
+
     # Uncomment to enable Instana EUM
     # environment:
       # INSTANA_EUM_KEY: <your eum key here>
 
 networks:
   robot-shop:
-

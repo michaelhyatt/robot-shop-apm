@@ -6,6 +6,10 @@ import spark.Spark;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Transaction;
+import co.elastic.apm.api.Span;
+
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
@@ -46,9 +50,9 @@ public class Main {
         //
         try {
             cpds = new ComboPooledDataSource();
-            cpds.setDriverClass( "com.mysql.jdbc.Driver" ); //loads the jdbc driver            
+            cpds.setDriverClass( "com.mysql.jdbc.Driver" ); //loads the jdbc driver
             cpds.setJdbcUrl( JDBC_URL );
-            cpds.setUser("shipping");                                  
+            cpds.setUser("shipping");
             cpds.setPassword("secret");
             // some config
             cpds.setMinPoolSize(5);
@@ -67,13 +71,20 @@ public class Main {
 
         Spark.get("/count", (req, res) -> {
             String data;
+
+            Transaction transaction = ElasticApm.startTransaction();
             try {
-                data = queryToJson("select count(*) as count from cities");
+                transaction.setName("/count");
+                transaction.setType(Transaction.TYPE_REQUEST);
+                data = queryToJson(transaction, "select count(*) as count from cities");
                 res.header("Content-Type", "application/json");
             } catch(Exception e) {
+                transaction.captureException(e);
                 logger.error("count", e);
                 res.status(500);
                 data = "ERROR";
+            } finally {
+                transaction.end();
             }
 
             return data;
@@ -81,14 +92,21 @@ public class Main {
 
         Spark.get("/codes", (req, res) -> {
             String data;
+
+            Transaction transaction = ElasticApm.startTransaction();
             try {
+                transaction.setName("/codes");
+                transaction.setType(Transaction.TYPE_REQUEST);
                 String query = "select code, name from codes order by name asc";
-                data = queryToJson(query);
+                data = queryToJson(transaction, query);
                 res.header("Content-Type", "application/json");
             } catch(Exception e) {
+                transaction.captureException(e);
                 logger.error("codes", e);
                 res.status(500);
                 data = "ERROR";
+            } finally {
+                transaction.end();
             }
 
             return data;
@@ -97,15 +115,22 @@ public class Main {
         // needed for load gen script
         Spark.get("/cities/:code", (req, res) -> {
             String data;
+
+            Transaction transaction = ElasticApm.startTransaction();
             try {
+                transaction.setName("/cities/:code");
+                transaction.setType(Transaction.TYPE_REQUEST);
                 String query = "select uuid, name from cities where country_code = ?";
                 logger.info("Query " + query);
-                data = queryToJson(query, req.params(":code"));
+                data = queryToJson(transaction, query, req.params(":code"));
                 res.header("Content-Type", "application/json");
             } catch(Exception e) {
+                transaction.captureException(e);
                 logger.error("cities", e);
                 res.status(500);
                 data = "ERROR";
+            } finally {
+                transaction.end();
             }
 
             return data;
@@ -113,15 +138,22 @@ public class Main {
 
         Spark.get("/match/:code/:text", (req, res) -> {
             String data;
+
+            Transaction transaction = ElasticApm.startTransaction();
             try {
+                transaction.setName("/cities/:code/:text");
+                transaction.setType(Transaction.TYPE_REQUEST);
                 String query = "select uuid, name from cities where country_code = ? and city like ? order by name asc limit 10";
                 logger.info("Query " + query);
-                data = queryToJson(query, req.params(":code"), req.params(":text") + "%");
+                data = queryToJson(transaction, query, req.params(":code"), req.params(":text") + "%");
                 res.header("Content-Type", "application/json");
             } catch(Exception e) {
+                transaction.captureException(e);
                 logger.error("match", e);
                 res.status(500);
                 data = "ERROR";
+            } finally {
+                transaction.end();
             }
 
             return data;
@@ -131,8 +163,12 @@ public class Main {
             double homeLat = 51.164896;
             double homeLong = 7.068792;
 
+            Transaction transaction = ElasticApm.startTransaction();
+            transaction.setName("/calc/:uuid");
+            transaction.setType(Transaction.TYPE_REQUEST);
+
             res.header("Content-Type", "application/json");
-            Location location = getLocation(req.params(":uuid"));
+            Location location = getLocation(transaction, req.params(":uuid"));
             Ship ship = new Ship();
             if(location != null) {
                 long distance = location.getDistance(homeLat, homeLong);
@@ -145,12 +181,19 @@ public class Main {
                 res.status(500);
             }
 
+            transaction.end();
+
             return new Gson().toJson(ship);
         });
 
         Spark.post("/confirm/:id", (req, res) -> {
+
+            Transaction transaction = ElasticApm.startTransaction();
+            transaction.setName("/confirm/:id");
+            transaction.setType(Transaction.TYPE_REQUEST);
+
             logger.info("confirm " + req.params(":id") + " - " + req.body());
-            String cart = addToCart(req.params(":id"), req.body());
+            String cart = addToCart(transaction, req.params(":id"), req.body());
             logger.info("new cart " + cart);
 
             if(cart.equals("")) {
@@ -158,6 +201,8 @@ public class Main {
             } else {
                 res.header("Content-Type", "application/json");
             }
+
+            transaction.end();
 
             return cart;
         });
@@ -170,13 +215,21 @@ public class Main {
     /**
      * Query to Json - QED
      **/
-    private static String queryToJson(String query, Object ... args) {
+    private static String queryToJson(Span transaction, String query, Object ... args) {
+
+        Span span = transaction.createSpan();
+
         List<Map<String, Object>> listOfMaps = null;
         try {
+            span.setName(query);
+            span.setType("db.mysql.query");
             QueryRunner queryRunner = new QueryRunner(cpds);
             listOfMaps = queryRunner.query(query, new MapListHandler(), args);
         } catch (SQLException se) {
+            ElasticApm.captureException(se);
             throw new RuntimeException("Couldn't query the database.", se);
+        } finally {
+          span.end();
         }
 
         return new Gson().toJson(listOfMaps);
@@ -185,14 +238,19 @@ public class Main {
     /**
      * Special case for location, dont want Json
      **/
-    private static Location getLocation(String uuid) {
+    private static Location getLocation(Span transaction, String uuid) {
         Location location = null;
         Connection conn = null;
         Statement stmt = null;
         ResultSet rs = null;
         String query = "select latitude, longitude from cities where uuid = " + uuid;
 
+        Span span = transaction.createSpan();
+
         try {
+            span.setName(query);
+            span.setType("db.mysql.query");
+
             conn = cpds.getConnection();
             stmt = conn.createStatement();
             rs = stmt.executeQuery(query);
@@ -201,19 +259,27 @@ public class Main {
                 break;
             }
         } catch(Exception e) {
+            ElasticApm.captureException(e);
             logger.error("Query exception", e);
         } finally {
             DbUtils.closeQuietly(conn, stmt, rs);
+            span.end();
         }
 
         return location;
     }
 
-    private static String addToCart(String id, String data) {
+    private static String addToCart(Span transaction, String id, String data) {
         StringBuilder buffer = new StringBuilder();
+
+        Span span = transaction.createSpan();
 
         DefaultHttpClient httpClient = null;
         try {
+
+            span.setName("add_to_cart");
+            span.setType("req");
+
             // set timeout to 5 secs
             HttpParams httpParams = new BasicHttpParams();
             HttpConnectionParams.setConnectionTimeout(httpParams, 5000);
@@ -235,8 +301,10 @@ public class Main {
                 logger.warn("Failed with code: " + res.getStatusLine().getStatusCode());
             }
         } catch(Exception e) {
+            ElasticApm.captureException(e);
             logger.error("http client exception", e);
         } finally {
+            span.end();
             if(httpClient != null) {
                 httpClient.getConnectionManager().shutdown();
             }
