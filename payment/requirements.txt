@@ -1,4 +1,4 @@
 Flask
 requests
 pika
-instana
+elastic-apm[flask]

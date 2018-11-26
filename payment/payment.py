@@ -5,14 +5,15 @@ import logging
 import uuid
 import json
 import requests
-import opentracing as ot
-import opentracing.ext.tags as tags
 from flask import Flask
 from flask import request
 from flask import jsonify
 from rabbitmq import Publisher
+from elasticapm.contrib.flask import ElasticAPM
+
 
 app = Flask(__name__)
+apm = ElasticAPM(app)
 
 CART = os.getenv('CART_HOST', 'cart')
 USER = os.getenv('USER_HOST', 'user')
@@ -50,29 +51,15 @@ def pay(id):
 
 def queueOrder(order):
     app.logger.info('queue order')
-    # RabbitMQ is not currently traced automatically
-    # opentracing tracer is automatically set to Instana tracer
-    # start a span
 
-    # context = ot.tracer.current_context()
-    parent_span = ot.tracer.active_span
-    with ot.tracer.start_active_span('queue-order', child_of=parent_span,
-            tags={
-                tags.SPAN_KIND: 'producer',
-                tags.COMPONENT: 'payment',
-                'message_bus.destination': 'orders'
-                }
-            ) as scope:
+    # For screenshot demo requirements optionally add in a bit of delay
+    delay = int(os.getenv('PAYMENT_DELAY_MS', 0))
+    time.sleep(delay / 1000)
 
-        # For screenshot demo requirements optionally add in a bit of delay
-        delay = int(os.getenv('PAYMENT_DELAY_MS', 0))
-        time.sleep(delay / 1000)
+    headers = {}
+    app.logger.info('msg headers {}'.format(headers))
 
-        headers = {}
-        ot.tracer.inject(scope.span.context, ot.Format.HTTP_HEADERS, headers)
-        app.logger.info('msg headers {}'.format(headers))
-
-        publisher.publish(order, headers)
+    publisher.publish(order, headers)
 
 # RabbitMQ
 publisher = Publisher(app.logger)

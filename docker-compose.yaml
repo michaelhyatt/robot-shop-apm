@@ -145,6 +145,11 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
+    environment:
+      - ELASTIC_APM_SERVICE_NAME=payment-python
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_LOG_LEVEL=debug
+      - ELASTIC_APM_ACTIVE=true
 
   dispatch:
     build:
