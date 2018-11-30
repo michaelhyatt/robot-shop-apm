@@ -144,7 +144,7 @@
                 console.log('ERROR', e);
             });
         }
-        
+
         // watch for login
         $scope.$watch(() => { return currentUser.uniqueid; }, (newVal, oldVal) => {
             if(newVal !== oldVal) {
@@ -223,7 +223,7 @@
                 console.log('ERROR', e);
             });
         };
-        
+
         $scope.glowstan = function(vote, val) {
             console.log('glowstan', vote);
             var idx = vote;
@@ -259,7 +259,7 @@
             console.log('clear message');
             $scope.data.message = ' ';
         }
-        
+
         loadProduct($routeParams.sku);
         loadRating($routeParams.sku);
     });
@@ -273,7 +273,7 @@
         $scope.buy = function() {
             $location.url('/shipping');
         };
-        
+
         $scope.change = function(sku, qty) {
             // update the cart
             var url = '/api/cart/update/' + $scope.data.uniqueid + '/' + sku + '/' + qty;
@@ -382,7 +382,7 @@
                 console.log('ERROR', e);
             });
         }
-        
+
         function buildauto() {
             autoLocation = new autoComplete({
                 selector: 'input[id=location]',

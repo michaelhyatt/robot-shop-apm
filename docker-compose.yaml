@@ -205,7 +205,7 @@ services:
     container_name: apm_server
     ports: ['8200:8200']
     networks: ['robot-shop']
-    command: --strict.perms=false -e  # -e flag to log to stderr and disable syslog/file output
+    command: -E "apm-server.rum.enabled=true" -E "apm-server.rum.rate_limit=10" -E "apm-server.rum.allow_origins=['*']" -E "apm-server.rum.library_pattern='node_modules|bower_components|~'" -E "apm-server.rum.exclude_from_grouping='^/webpack'" -E "apm-server.rum.source_mapping.cache.expiration=5m" -E "apm-server.rum.source_mapping.index_pattern='apm-*-sourcemap*'" --strict.perms=false -e  # -e flag to log to stderr and disable syslog/file output
     depends_on: ['elasticsearch', 'kibana']
 
     # Uncomment to enable Instana EUM

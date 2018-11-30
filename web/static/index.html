@@ -63,6 +63,15 @@
 </div>
 
 <!-- JavaScript -->
+<script src="/js/elastic-apm-js-base/dist/bundles/elastic-apm-js-base.umd.min.js"></script>
+<script>
+  elasticApm.init({
+    serviceName: 'web-rum',
+    serviceVersion: 'v1.0',
+    serverUrl: 'http://localhost:8200',
+  })
+</script>
+
 <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.7/angular.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.7/angular-route.js"></script>
 <script src="js/auto-complete.js"></script>
