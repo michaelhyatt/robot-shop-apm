@@ -1,9 +1,32 @@
+// import { init as initApm } from 'elastic-apm-js-base';
+var global = global || window;
+
 (function(angular) {
     'use strict';
 
     var robotshop = angular.module('robotshop', ['ngRoute'])
 
+    var apm = elasticApm.init({
+      serviceName: 'web-rum',
+      serviceVersion: 'v1.0',
+      serverUrl: 'http://localhost:8200',
+      pageLoadTransactionName: "first-page-load",
+      distributedTracing: true,
+      distributedTracingOrigins: [],
+      pageLoadTraceId: "123",
+      pageLoadSpanId: "456",
+      pageLoadSampled: true
+    });
+
     // Share user between controllers
+    robotshop.factory('apmFactory', function() {
+        var data = {
+            apm: apm
+          };
+
+        return data;
+    });
+
     robotshop.factory('currentUser', function() {
         var data = {
             uniqueid: '',
@@ -71,8 +94,10 @@
         });
     });
 
-    robotshop.controller('shopform', function($scope, $http, $location, currentUser) {
+    robotshop.controller('shopform', function($scope, $http, $location, currentUser, apmFactory) {
         $scope.data = {};
+
+        $scope.apm = apmFactory.apm;
 
         $scope.data.uniqueid = 'foo';
         $scope.data.categories = [];
@@ -84,16 +109,27 @@
         };
 
         $scope.getProducts = function(category) {
+
             if($scope.data.products[category]) {
                 $scope.data.products[category] = null;
             } else {
+
+                $scope.transaction = $scope.apm.startTransaction('getProducts', 'custom');
+                $scope.httpSpan = $scope.transaction.startSpan('getProducts', 'http');
+
                 $http({
                     url: '/api/catalogue/products/' + category,
                     method: 'GET'
                 }).then((res) => {
                     $scope.data.products[category] = res.data;
+
+                    $scope.httpSpan.end();
+                    $scope.transaction.end();
+
                 }).catch((e) => {
                     console.log('ERROR', e);
+
+                    $scope.apm.captureError(e);
                 });
             }
         };
@@ -106,27 +142,47 @@
         };
 
         function getCategories() {
+
+            $scope.transaction = $scope.apm.startTransaction('getCategories', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('getCategories', 'http');
+
             $http({
                 url: '/api/catalogue/categories',
                 method: 'GET'
             }).then((res) => {
                 $scope.data.categories = res.data;
                 console.log('categories loaded');
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         }
 
         // unique id for cart etc
         function getUniqueid() {
             return new Promise((resolve, reject) => {
+
+            $scope.transaction = $scope.apm.startTransaction('getUniqueid', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('getUniqueid', 'http');
+
             $http({
                 url: '/api/user/uniqueid',
                 method: 'GET'
             }).then((res) => {
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
+
                 resolve(res.data.uuid);
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
+
                 reject(e);
             });
         });
@@ -160,20 +216,32 @@
         });
     });
 
-    robotshop.controller('searchform', function($scope, $http, $routeParams) {
+    robotshop.controller('searchform', function($scope, $http, $routeParams, apmFactory) {
+
+        $scope.apm = apmFactory.apm;
+
         $scope.data = {};
         $scope.data.searchResults = [];
 
         function search(text) {
             if(text) {
+
+                $scope.transaction = $scope.apm.startTransaction('search', 'custom');
+                $scope.httpSpan = $scope.transaction.startSpan('search', 'http');
+
                 $http({
                     url: '/api/catalogue/search/' + text,
                     method: 'GET'
                 }).then((res) => {
                     console.log('search results', res.data);
                     $scope.data.searchResults = res.data;
+
+                    $scope.httpSpan.end();
+                    $scope.transaction.end();
                 }).catch((e) => {
                     console.log('ERROR', e);
+
+                    $scope.apm.captureError(e);
                 });
             }
         }
@@ -183,7 +251,7 @@
         search(text);
     });
 
-    robotshop.controller('productform', function($scope, $http, $routeParams, $timeout, currentUser) {
+    robotshop.controller('productform', function($scope, $http, $routeParams, $timeout, currentUser, apmFactory) {
         $scope.data = {};
         $scope.data.message = ' ';
         $scope.data.product = {};
@@ -191,9 +259,15 @@
         $scope.data.rating.avg_rating = 0;
         $scope.data.quantity = 1;
 
+        $scope.apm = apmFactory.apm;
+
         $scope.addToCart = function() {
             var url = '/api/cart/add/' + currentUser.uniqueid + '/' + $scope.data.product.sku + '/' + $scope.data.quantity;
             console.log('addToCart', url);
+
+            $scope.transaction = $scope.apm.startTransaction('addToCart', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('addToCart', 'http');
+
             $http({
                 url: url,
                 method: 'GET'
@@ -201,26 +275,41 @@
                 console.log('cart', res.data);
                 currentUser.cart = res.data;
                 $scope.data.message = 'Added to cart';
-                $timeout(clearMessage, 3000);
+                $timeout(clearMessage, 1500);
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
+
             }).catch((e) => {
                 console.log('ERROR', e);
                 $scope.data.message = 'ERROR ' + e;
-                $timeout(clearMessage, 3000);
+                $timeout(clearMessage, 1500);
+
+                $scope.apm.captureError(e);
             });
         };
 
         $scope.rateProduct = function(score) {
             console.log('rate product', $scope.data.product.sku, score);
             var url = '/api/ratings/api/rate/' + $scope.data.product.sku + '/' + score;
+
+            $scope.transaction = $scope.apm.startTransaction('rateProduct', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('rateProduct', 'http');
+
             $http({
                 url: url,
                 method: 'PUT'
             }).then((res) => {
                 $scope.data.message = 'Thankyou for your feedback';
-                $timeout(clearMessage, 3000);
+                $timeout(clearMessage, 1500);
                 loadRating($scope.data.product.sku);
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         };
 
@@ -234,24 +323,42 @@
         };
 
         function loadProduct(sku) {
+
+            $scope.transaction = $scope.apm.startTransaction('loadProduct', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('loadProduct', 'http');
+
             $http({
                 url: '/api/catalogue/product/' + sku,
                 method: 'GET'
             }).then((res) => {
                 $scope.data.product = res.data;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         }
 
         function loadRating(sku) {
+
+            $scope.transaction = $scope.apm.startTransaction('loadRating', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('loadRating', 'http');
+
             $http({
                 url: '/api/ratings/api/fetch/' + sku,
                 method: 'GET'
             }).then((res) => {
                 $scope.data.rating = res.data;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         }
 
@@ -264,17 +371,23 @@
         loadRating($routeParams.sku);
     });
 
-    robotshop.controller('cartform', function($scope, $http, $location, currentUser) {
+    robotshop.controller('cartform', function($scope, $http, $location, currentUser, apmFactory) {
         $scope.data = {};
         $scope.data.cart = {};
         $scope.data.cart.total = 0;
         $scope.data.uniqueid = currentUser.uniqueid;
+
+        $scope.apm = apmFactory.apm;
 
         $scope.buy = function() {
             $location.url('/shipping');
         };
 
         $scope.change = function(sku, qty) {
+
+            $scope.transaction = $scope.apm.startTransaction('change', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('change', 'http');
+
             // update the cart
             var url = '/api/cart/update/' + $scope.data.uniqueid + '/' + sku + '/' + qty;
             console.log('change', url);
@@ -284,12 +397,20 @@
             }).then((res) => {
                 $scope.data.cart = res.data;
                 currentUser.cart = res.data;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         };
 
         function loadCart(id) {
+            $scope.transaction = $scope.apm.startTransaction('loadCart', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('loadCart', 'http');
+
             $http({
                 url: '/api/cart/cart/' + id,
                 method: 'GET'
@@ -303,8 +424,13 @@
                     }).then((res) => {
                         currentUser.cart = res.data;
                         $scope.data.cart = res.data;
+
+                        $scope.httpSpan.end();
+                        $scope.transaction.end();
                     }).catch((e) => {
                         console.log('ERROR', e);
+
+                        $scope.apm.captureError(e);
                     });
                 } else {
                     $scope.data.cart = cart;
@@ -318,7 +444,7 @@
         console.log('cart init');
     });
 
-    robotshop.controller('shipform', function($scope, $http, $location, currentUser) {
+    robotshop.controller('shipform', function($scope, $http, $location, currentUser, apmFactory) {
         $scope.data = {};
         $scope.data.countries = [];
         $scope.data.selectedCountry = '';
@@ -327,8 +453,14 @@
         $scope.data.disableCalc = true;
         $scope.data.shipping = '';
 
+        $scope.apm = apmFactory.apm;
+
         $scope.calcShipping = function() {
             console.log('calc uuid', uuid);
+
+            $scope.transaction = $scope.apm.startTransaction('calcShipping', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('calcShipping', 'http');
+
             $http({
                 url: '/api/shipping/calc/' + uuid,
                 method: 'GET'
@@ -336,18 +468,30 @@
                 console.log('shipping data', res.data);
                 $scope.data.shipping = res.data;
                 $scope.data.shipping.location = $scope.data.selectedCountry.name + ' ' + autoLocation;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         };
 
         $scope.confirmShipping = function() {
             console.log('shipping confirmed');
+
+            $scope.transaction = $scope.apm.startTransaction('confirmShipping', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('confirmShipping', 'http');
+
             $http({
                 url: '/api/shipping/confirm/' + currentUser.uniqueid,
                 method: 'POST',
                 data: $scope.data.shipping
             }).then((res) => {
+                $scope.httpSpan.end();
+                $scope.transaction.end();
+
                 // go to final confirmation
                 console.log('confirm cart', res.data);
                 // save new cart
@@ -355,6 +499,8 @@
                 $location.url('/payment');
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         };
 
@@ -373,13 +519,22 @@
         var uuid;
 
         function loadCodes() {
+
+            $scope.transaction = $scope.apm.startTransaction('loadCodes', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('loadCodes', 'http');
+
             $http({
                 url: '/api/shipping/codes',
                 method: 'GET'
             }).then((res) => {
                 $scope.data.countries = res.data;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         }
 
@@ -389,14 +544,23 @@
                 source: (term, suggest) => {
                     console.log('autocomplete', term);
                     $scope.data.disableCalc = true;
+
+                    $scope.transaction = $scope.apm.startTransaction('buildAutoSuggest', 'custom');
+                    $scope.httpSpan = $scope.transaction.startSpan('buildAutoSuggest', 'http');
+
                     $http({
                         url: '/api/shipping/match/' + $scope.data.selectedCountry.code + '/' + term,
                         method: 'GET'
                     }).then((res) => {
                         console.log('suggest', res.data);
                         suggest(res.data);
+
+                        $scope.httpSpan.end();
+                        $scope.transaction.end();
                     }).catch((e) => {
                         console.log('ERROR', e);
+
+                        $scope.apm.captureError(e);
                     });
                 },
                 renderItem: (item, search) => {
@@ -420,7 +584,7 @@
         buildauto();
     });
 
-    robotshop.controller('paymentform', function($scope, $http, currentUser) {
+    robotshop.controller('paymentform', function($scope, $http, currentUser, apmFactory) {
         $scope.data = {};
         $scope.data.message = ' ';
         $scope.data.buttonDisabled = false;
@@ -428,8 +592,14 @@
         $scope.data.uniqueid = currentUser.uniqueid;
         $scope.data.cart = currentUser.cart;
 
+        $scope.apm = apmFactory.apm;
+
         $scope.pay = function() {
             $scope.data.buttonDisabled = true;
+
+            $scope.transaction = $scope.apm.startTransaction('pay', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('pay', 'http');
+
             $http({
                 url: '/api/payment/pay/' + $scope.data.uniqueid,
                 method: 'POST',
@@ -444,17 +614,22 @@
                 };
                 currentUser.cart = $scope.data.cart;
                 $scope.data.cont = true;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
                 $scope.data.message = 'ERROR placing order';
                 $scope.data.buttonDisabled = false;
+
+                $scope.apm.captureError(e);
             });
         };
 
         console.log('paymentform init');
     });
 
-    robotshop.controller('loginform', function($scope, $http, currentUser) {
+    robotshop.controller('loginform', function($scope, $http, currentUser, apmFactory) {
         $scope.data = {};
         $scope.data.name = '';
         $scope.data.email = '';
@@ -463,8 +638,14 @@
         $scope.data.message = '';
         $scope.data.user = {};
 
+        $scope.apm = apmFactory.apm;
+
         $scope.login = function() {
             $scope.data.message = '';
+
+            $scope.transaction = $scope.apm.startTransaction('login', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('login', 'http');
+
             $http({
                 url: '/api/user/login',
                 method: 'POST',
@@ -480,20 +661,32 @@
                 currentUser.user = $scope.data.user;
                 currentUser.uniqueid = $scope.data.user.name;
                 // login OK move cart across
+
+                $scope.httpSpan1 = $scope.transaction.startSpan('rename', 'http');
                 $http({
                     url: '/api/cart/rename/' + oldId + '/' + $scope.data.user.name,
                     method: 'GET'
                 }).then((res) => {
                     console.log('cart moved OK');
+
+                    $scope.httpSpan1.end();
                 }).catch((e) => {
                     // 404 is OK as cart might not exist yet
                     console.log('ERROR', e);
+
+                    $scope.apm.captureError(e);
                 });
                 loadHistory(currentUser.user.name);
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
+
             }).catch((e) => {
                 console.log('ERROR', e);
                 $scope.data.message = 'ERROR ' + e.data;
                 $scope.data.password = '';
+
+                $scope.apm.captureError(e);
             });
         };
 
@@ -511,6 +704,10 @@
                     return;
                 }
             }
+
+            $scope.transaction = $scope.apm.startTransaction('register', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('register', 'http');
+
             $http({
                 url: '/api/user/register',
                 method: 'POST',
@@ -527,22 +724,36 @@
                 $scope.data.password = $scope.data.password2 = '';
                 currentUser.user = $scope.data.user;
                 currentUser.uniqueid = $scope.data.user.name;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
                 $scope.data.message = 'ERROR ' + e.data;
                 $scope.data.password = $scope.data.password2 = '';
+
+                $scope.apm.captureError(e);
             });
         };
 
         function loadHistory(id) {
+
+            $scope.transaction = $scope.apm.startTransaction('loadHistory', 'custom');
+            $scope.httpSpan = $scope.transaction.startSpan('loadHistory', 'http');
+
             $http({
                 url: '/api/user/history/' + id,
                 method: 'GET'
             }).then((res) => {
                 console.log('history', res.data);
                 $scope.data.orderHistory = res.data.history;
+
+                $scope.httpSpan.end();
+                $scope.transaction.end();
             }).catch((e) => {
                 console.log('ERROR', e);
+
+                $scope.apm.captureError(e);
             });
         }
 
