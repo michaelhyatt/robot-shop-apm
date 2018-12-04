@@ -24,7 +24,7 @@ public class Location {
      * Formula is Haversine https://www.movable-type.co.uk/scripts/latlong.html
      **/
     public long getDistance(double targetLatitude, double targetLongitude) {
-        double distance = 0.0;
+        //double distance = 0.0;
         double earthRadius = 6371e3; // meters
 
         // convert to radians

@@ -12,8 +12,8 @@ public class Ship {
         this.cost = 0.0;
     }
 
-    public Ship(long distnace, double cost) {
-        this.distance = distance;
+    public Ship(long dist, double cost) {
+        this.distance = dist;
         this.cost = cost;
     }
 

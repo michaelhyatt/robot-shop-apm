@@ -1,15 +1,19 @@
 package org.steveww.spark;
 
-import com.mchange.v2.c3p0.ComboPooledDataSource;
-import spark.Spark;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import co.elastic.apm.api.ElasticApm;
-import co.elastic.apm.api.Transaction;
-import co.elastic.apm.api.Span;
-
+import org.apache.commons.dbutils.DbUtils;
+import org.apache.commons.dbutils.QueryRunner;
+import org.apache.commons.dbutils.handlers.MapListHandler;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
@@ -17,299 +21,300 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.params.BasicHttpParams;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
-import org.apache.commons.dbutils.QueryRunner;
-import org.apache.commons.dbutils.handlers.MapListHandler;
-import org.apache.commons.dbutils.DbUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.google.gson.Gson;
+import com.mchange.v2.c3p0.ComboPooledDataSource;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.sql.Connection;
-import java.sql.Statement;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.Types;
-import java.sql.SQLException;
-import java.util.List;
-import java.util.Map;
+import co.elastic.apm.opentracing.ElasticApmTracer;
+import io.opentracing.Scope;
+import io.opentracing.Span;
+import io.opentracing.SpanContext;
+import io.opentracing.Tracer;
+import io.opentracing.propagation.Format;
+import io.opentracing.propagation.TextMapExtractAdapter;
+import io.opentracing.tag.Tags;
+import spark.Request;
+import spark.Spark;
 
+@SuppressWarnings("deprecation")
 public class Main {
-    private static String CART_URL = null;
-    private static String JDBC_URL = null;
-    private static Logger logger = LoggerFactory.getLogger(Main.class);
-    private static ComboPooledDataSource cpds = null;
+	private static String CART_URL = null;
+	private static String JDBC_URL = null;
+	private static Logger logger = LoggerFactory.getLogger(Main.class);
+	private static ComboPooledDataSource cpds = null;
 
-    public static void main(String[] args) {
-        // Get ENV configuration values
-        CART_URL = String.format("http://%s/shipping/", System.getenv("CART_ENDPOINT") != null ? System.getenv("CART_ENDPOINT") : "cart");
-        JDBC_URL = String.format("jdbc:mysql://%s/cities?useSSL=false&autoReconnect=true", System.getenv("DB_HOST") != null ? System.getenv("DB_HOST") : "mysql");
+	public static void main(String[] args) {
+		// Get ENV configuration values
+		CART_URL = String.format("http://%s/shipping/",
+				System.getenv("CART_ENDPOINT") != null ? System.getenv("CART_ENDPOINT") : "cart");
+		JDBC_URL = String.format("jdbc:mysql://%s/cities?useSSL=false&autoReconnect=true",
+				System.getenv("DB_HOST") != null ? System.getenv("DB_HOST") : "mysql");
 
-        //
-        // Create database connector
-        // TODO - might need a retry loop here
-        //
-        try {
-            cpds = new ComboPooledDataSource();
-            cpds.setDriverClass( "com.mysql.jdbc.Driver" ); //loads the jdbc driver
-            cpds.setJdbcUrl( JDBC_URL );
-            cpds.setUser("shipping");
-            cpds.setPassword("secret");
-            // some config
-            cpds.setMinPoolSize(5);
-            cpds.setAcquireIncrement(5);
-            cpds.setMaxPoolSize(20);
-            cpds.setMaxStatements(180);
-        }
-        catch(Exception e) {
-            logger.error("Database Exception", e);
-        }
+		Tracer tracer = new ElasticApmTracer();
 
-        // Spark
-        Spark.port(8080);
+		//
+		// Create database connector
+		// TODO - might need a retry loop here
+		//
+		try {
+			cpds = new ComboPooledDataSource();
+			cpds.setDriverClass("com.mysql.jdbc.Driver"); // loads the jdbc driver
+			cpds.setJdbcUrl(JDBC_URL);
+			cpds.setUser("shipping");
+			cpds.setPassword("secret");
+			// some config
+			cpds.setMinPoolSize(5);
+			cpds.setAcquireIncrement(5);
+			cpds.setMaxPoolSize(20);
+			cpds.setMaxStatements(180);
+		} catch (Exception e) {
+			logger.error("Database Exception", e);
+		}
 
-        Spark.get("/health", (req, res) -> "OK");
+		// Spark
+		Spark.port(8080);
 
-        Spark.get("/count", (req, res) -> {
-            String data;
+		Spark.get("/health", (req, res) -> "OK");
 
-            Transaction transaction = ElasticApm.startTransaction();
-            try {
-                transaction.setName("/count");
-                transaction.setType(Transaction.TYPE_REQUEST);
-                data = queryToJson(transaction, "select count(*) as count from cities");
-                res.header("Content-Type", "application/json");
-            } catch(Exception e) {
-                transaction.captureException(e);
-                logger.error("count", e);
-                res.status(500);
-                data = "ERROR";
-            } finally {
-                transaction.end();
-            }
+		Spark.get("/count", (req, res) -> {
+			String data;
 
-            return data;
-        });
+			Span span = startServerSpan(tracer, req, "/count").span();
 
-        Spark.get("/codes", (req, res) -> {
-            String data;
+			try {
 
-            Transaction transaction = ElasticApm.startTransaction();
-            try {
-                transaction.setName("/codes");
-                transaction.setType(Transaction.TYPE_REQUEST);
-                String query = "select code, name from codes order by name asc";
-                data = queryToJson(transaction, query);
-                res.header("Content-Type", "application/json");
-            } catch(Exception e) {
-                transaction.captureException(e);
-                logger.error("codes", e);
-                res.status(500);
-                data = "ERROR";
-            } finally {
-                transaction.end();
-            }
+				data = queryToJson("select count(*) as count from cities");
+				res.header("Content-Type", "application/json");
+			} catch (Exception e) {
 
-            return data;
-        });
+				logger.error("count", e);
+				res.status(500);
+				data = "ERROR";
+			} finally {
+				span.finish();
+			}
 
-        // needed for load gen script
-        Spark.get("/cities/:code", (req, res) -> {
-            String data;
+			return data;
+		});
 
-            Transaction transaction = ElasticApm.startTransaction();
-            try {
-                transaction.setName("/cities/:code");
-                transaction.setType(Transaction.TYPE_REQUEST);
-                String query = "select uuid, name from cities where country_code = ?";
-                logger.info("Query " + query);
-                data = queryToJson(transaction, query, req.params(":code"));
-                res.header("Content-Type", "application/json");
-            } catch(Exception e) {
-                transaction.captureException(e);
-                logger.error("cities", e);
-                res.status(500);
-                data = "ERROR";
-            } finally {
-                transaction.end();
-            }
+		Spark.get("/codes", (req, res) -> {
+			String data;
 
-            return data;
-        });
+			Span span = startServerSpan(tracer, req, "/codes").span();
+			
+			try {
 
-        Spark.get("/match/:code/:text", (req, res) -> {
-            String data;
+				String query = "select code, name from codes order by name asc";
+				data = queryToJson(query);
+				res.header("Content-Type", "application/json");
+			} catch (Exception e) {
+				logger.error("codes", e);
+				res.status(500);
+				data = "ERROR";
+			} finally {
+				span.finish();
+			}
+			
+			return data;
+		});
 
-            Transaction transaction = ElasticApm.startTransaction();
-            try {
-                transaction.setName("/cities/:code/:text");
-                transaction.setType(Transaction.TYPE_REQUEST);
-                String query = "select uuid, name from cities where country_code = ? and city like ? order by name asc limit 10";
-                logger.info("Query " + query);
-                data = queryToJson(transaction, query, req.params(":code"), req.params(":text") + "%");
-                res.header("Content-Type", "application/json");
-            } catch(Exception e) {
-                transaction.captureException(e);
-                logger.error("match", e);
-                res.status(500);
-                data = "ERROR";
-            } finally {
-                transaction.end();
-            }
+		// needed for load gen script
+		Spark.get("/cities/:code", (req, res) -> {
+			String data = "";
 
-            return data;
-        });
+			Span span = startServerSpan(tracer, req, "/cities/:code").span();
+			
+			try {
 
-        Spark.get("/calc/:uuid", (req, res) -> {
-            double homeLat = 51.164896;
-            double homeLong = 7.068792;
+				String query = "select uuid, name from cities where country_code = ?";
+				logger.info("Query " + query);
+				res.header("Content-Type", "application/json");
+			} catch (Exception e) {
+				logger.error("cities", e);
+				res.status(500);
+				data = "ERROR";
+			} finally {
+				span.finish();
+			}
 
-            Transaction transaction = ElasticApm.startTransaction();
-            transaction.setName("/calc/:uuid");
-            transaction.setType(Transaction.TYPE_REQUEST);
+			return data;
+		});
 
-            res.header("Content-Type", "application/json");
-            Location location = getLocation(transaction, req.params(":uuid"));
-            Ship ship = new Ship();
-            if(location != null) {
-                long distance = location.getDistance(homeLat, homeLong);
-                // charge 0.05 Euro per km
-                // try to avoid rounding errors
-                double cost = Math.rint(distance * 5) / 100.0;
-                ship.setDistance(distance);
-                ship.setCost(cost);
-            } else {
-                res.status(500);
-            }
+		Spark.get("/match/:code/:text", (req, res) -> {
+			String data;
 
-            transaction.end();
+			Span span = startServerSpan(tracer, req, "/match/:code/:text").span();
 
-            return new Gson().toJson(ship);
-        });
+			try {
+				String query = "select uuid, name from cities where country_code = ? and city like ? order by name asc limit 10";
+				logger.info("Query " + query);
+				data = queryToJson(query, req.params(":code"), req.params(":text") + "%");
+				res.header("Content-Type", "application/json");
+			} catch (Exception e) {
+				logger.error("match", e);
+				res.status(500);
+				data = "ERROR";
+			} finally {
+				span.finish();
+			}
 
-        Spark.post("/confirm/:id", (req, res) -> {
+			return data;
+		});
 
-            Transaction transaction = ElasticApm.startTransaction();
-            transaction.setName("/confirm/:id");
-            transaction.setType(Transaction.TYPE_REQUEST);
+		Spark.get("/calc/:uuid", (req, res) -> {
+			
+			Span span = startServerSpan(tracer, req, "/calc/:uuid").span();
+			
+			double homeLat = 51.164896;
+			double homeLong = 7.068792;
 
-            logger.info("confirm " + req.params(":id") + " - " + req.body());
-            String cart = addToCart(transaction, req.params(":id"), req.body());
-            logger.info("new cart " + cart);
+			res.header("Content-Type", "application/json");
+			Location location = getLocation(req.params(":uuid"));
+			Ship ship = new Ship();
+			if (location != null) {
+				long distance = location.getDistance(homeLat, homeLong);
+				// charge 0.05 Euro per km
+				// try to avoid rounding errors
+				double cost = Math.rint(distance * 5) / 100.0;
+				ship.setDistance(distance);
+				ship.setCost(cost);
+			} else {
+				res.status(500);
+			}
 
-            if(cart.equals("")) {
-                res.status(404);
-            } else {
-                res.header("Content-Type", "application/json");
-            }
+			span.finish();
+			
+			return new Gson().toJson(ship);
+		});
 
-            transaction.end();
+		Spark.post("/confirm/:id", (req, res) -> {
+			
+			Span span = startServerSpan(tracer, req, "/confirm/:id").span();
 
-            return cart;
-        });
+			logger.info("confirm " + req.params(":id") + " - " + req.body());
+			String cart = addToCart(req.params(":id"), req.body());
+			logger.info("new cart " + cart);
 
-        logger.info("Ready");
-    }
+			if (cart.equals("")) {
+				res.status(404);
+			} else {
+				res.header("Content-Type", "application/json");
+			}
 
+			span.finish();
+			
+			return cart;
+		});
 
+		logger.info("Ready");
+	}
 
-    /**
-     * Query to Json - QED
-     **/
-    private static String queryToJson(Span transaction, String query, Object ... args) {
+	private static Scope startServerSpan(Tracer tracer, Request req, String operationName) {
 
-        Span span = transaction.createSpan();
+		Set<String> rawHeaders = req.headers();
+		final HashMap<String, String> headers = new HashMap<String, String>();
 
-        List<Map<String, Object>> listOfMaps = null;
-        try {
-            span.setName(query);
-            span.setType("db.mysql.query");
-            QueryRunner queryRunner = new QueryRunner(cpds);
-            listOfMaps = queryRunner.query(query, new MapListHandler(), args);
-        } catch (SQLException se) {
-            ElasticApm.captureException(se);
-            throw new RuntimeException("Couldn't query the database.", se);
-        } finally {
-          span.end();
-        }
+		for (String key : rawHeaders) {
+			headers.put(key, req.headers(key));
+		}
 
-        return new Gson().toJson(listOfMaps);
-    }
+		Tracer.SpanBuilder spanBuilder;
+		try {
+			SpanContext parentSpan = tracer.extract(Format.Builtin.HTTP_HEADERS, new TextMapExtractAdapter(headers));
+			if (parentSpan == null) {
+				spanBuilder = tracer.buildSpan(operationName);
+			} else {
+				spanBuilder = tracer.buildSpan(operationName).asChildOf(parentSpan);
+			}
+		} catch (IllegalArgumentException e) {
+			spanBuilder = tracer.buildSpan(operationName);
+		}
+		return spanBuilder.withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER).startActive(true);
+	}
 
-    /**
-     * Special case for location, dont want Json
-     **/
-    private static Location getLocation(Span transaction, String uuid) {
-        Location location = null;
-        Connection conn = null;
-        Statement stmt = null;
-        ResultSet rs = null;
-        String query = "select latitude, longitude from cities where uuid = " + uuid;
+	/**
+	 * Query to Json - QED
+	 **/
+	private static String queryToJson(String query, Object... args) {
 
-        Span span = transaction.createSpan();
+		List<Map<String, Object>> listOfMaps = null;
+		try {
+			QueryRunner queryRunner = new QueryRunner(cpds);
+			listOfMaps = queryRunner.query(query, new MapListHandler(), args);
+		} catch (SQLException se) {
 
-        try {
-            span.setName(query);
-            span.setType("db.mysql.query");
+			throw new RuntimeException("Couldn't query the database.", se);
+		}
 
-            conn = cpds.getConnection();
-            stmt = conn.createStatement();
-            rs = stmt.executeQuery(query);
-            while(rs.next()) {
-                location = new Location(rs.getDouble(1), rs.getDouble(2));
-                break;
-            }
-        } catch(Exception e) {
-            ElasticApm.captureException(e);
-            logger.error("Query exception", e);
-        } finally {
-            DbUtils.closeQuietly(conn, stmt, rs);
-            span.end();
-        }
+		return new Gson().toJson(listOfMaps);
+	}
 
-        return location;
-    }
+	/**
+	 * Special case for location, dont want Json
+	 **/
+	private static Location getLocation(String uuid) {
+		Location location = null;
+		Connection conn = null;
+		Statement stmt = null;
+		ResultSet rs = null;
+		String query = "select latitude, longitude from cities where uuid = " + uuid;
 
-    private static String addToCart(Span transaction, String id, String data) {
-        StringBuilder buffer = new StringBuilder();
+		try {
 
-        Span span = transaction.createSpan();
+			conn = cpds.getConnection();
+			stmt = conn.createStatement();
+			rs = stmt.executeQuery(query);
+			while (rs.next()) {
+				location = new Location(rs.getDouble(1), rs.getDouble(2));
+				break;
+			}
+		} catch (Exception e) {
 
-        DefaultHttpClient httpClient = null;
-        try {
+			logger.error("Query exception", e);
+		} finally {
+			DbUtils.closeQuietly(conn, stmt, rs);
 
-            span.setName("add_to_cart");
-            span.setType("req");
+		}
 
-            // set timeout to 5 secs
-            HttpParams httpParams = new BasicHttpParams();
-            HttpConnectionParams.setConnectionTimeout(httpParams, 5000);
+		return location;
+	}
 
-            httpClient = new DefaultHttpClient(httpParams);
-            HttpPost postRequest = new HttpPost(CART_URL + id);
-            StringEntity payload = new StringEntity(data);
-            payload.setContentType("application/json");
-            postRequest.setEntity(payload);
-            HttpResponse res = httpClient.execute(postRequest);
+	private static String addToCart(String id, String data) {
+		StringBuilder buffer = new StringBuilder();
 
-            if(res.getStatusLine().getStatusCode() == 200) {
-                BufferedReader in = new BufferedReader(new InputStreamReader(res.getEntity().getContent()));
-                String line;
-                while((line = in.readLine()) != null) {
-                    buffer.append(line);
-                }
-            } else {
-                logger.warn("Failed with code: " + res.getStatusLine().getStatusCode());
-            }
-        } catch(Exception e) {
-            ElasticApm.captureException(e);
-            logger.error("http client exception", e);
-        } finally {
-            span.end();
-            if(httpClient != null) {
-                httpClient.getConnectionManager().shutdown();
-            }
-        }
+		DefaultHttpClient httpClient = null;
+		try {
 
-        return buffer.toString();
-    }
+			// set timeout to 5 secs
+			HttpParams httpParams = new BasicHttpParams();
+			HttpConnectionParams.setConnectionTimeout(httpParams, 5000);
+
+			httpClient = new DefaultHttpClient(httpParams);
+			HttpPost postRequest = new HttpPost(CART_URL + id);
+			StringEntity payload = new StringEntity(data);
+			payload.setContentType("application/json");
+			postRequest.setEntity(payload);
+			HttpResponse res = httpClient.execute(postRequest);
+
+			if (res.getStatusLine().getStatusCode() == 200) {
+				BufferedReader in = new BufferedReader(new InputStreamReader(res.getEntity().getContent()));
+				String line;
+				while ((line = in.readLine()) != null) {
+					buffer.append(line);
+				}
+			} else {
+				logger.warn("Failed with code: " + res.getStatusLine().getStatusCode());
+			}
+		} catch (Exception e) {
+			logger.error("http client exception", e);
+		} finally {
+			if (httpClient != null) {
+				httpClient.getConnectionManager().shutdown();
+			}
+		}
+
+		return buffer.toString();
+	}
 }
