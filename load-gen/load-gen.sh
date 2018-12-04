@@ -4,7 +4,7 @@
 
 # Changing the NUM_CLIENTS environment variable varies the load on the application
 # The bigger the number the more requests, the bigger the load
-NUM_CLIENTS=1
+NUM_CLIENTS=3
 
 # HOST where Stan's Robot Shop web UI is running
 HOST="http://localhost:8080"
@@ -41,4 +41,3 @@ else
         -e "NUM_CLIENTS=$NUM_CLIENTS" \
         ${REPO}/rs-load:${TAG}
 fi
-

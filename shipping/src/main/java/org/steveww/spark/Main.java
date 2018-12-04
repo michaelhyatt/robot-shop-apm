@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -33,6 +34,7 @@ import io.opentracing.Span;
 import io.opentracing.SpanContext;
 import io.opentracing.Tracer;
 import io.opentracing.propagation.Format;
+import io.opentracing.propagation.TextMap;
 import io.opentracing.propagation.TextMapExtractAdapter;
 import io.opentracing.tag.Tags;
 import spark.Request;
@@ -103,7 +105,7 @@ public class Main {
 			String data;
 
 			Span span = startServerSpan(tracer, req, "/codes").span();
-			
+
 			try {
 
 				String query = "select code, name from codes order by name asc";
@@ -116,7 +118,7 @@ public class Main {
 			} finally {
 				span.finish();
 			}
-			
+
 			return data;
 		});
 
@@ -125,7 +127,7 @@ public class Main {
 			String data = "";
 
 			Span span = startServerSpan(tracer, req, "/cities/:code").span();
-			
+
 			try {
 
 				String query = "select uuid, name from cities where country_code = ?";
@@ -164,9 +166,9 @@ public class Main {
 		});
 
 		Spark.get("/calc/:uuid", (req, res) -> {
-			
+
 			Span span = startServerSpan(tracer, req, "/calc/:uuid").span();
-			
+
 			double homeLat = 51.164896;
 			double homeLong = 7.068792;
 
@@ -185,16 +187,16 @@ public class Main {
 			}
 
 			span.finish();
-			
+
 			return new Gson().toJson(ship);
 		});
 
 		Spark.post("/confirm/:id", (req, res) -> {
-			
+
 			Span span = startServerSpan(tracer, req, "/confirm/:id").span();
 
 			logger.info("confirm " + req.params(":id") + " - " + req.body());
-			String cart = addToCart(req.params(":id"), req.body());
+			String cart = addToCart(req.params(":id"), req.body(), tracer, span);
 			logger.info("new cart " + cart);
 
 			if (cart.equals("")) {
@@ -204,7 +206,7 @@ public class Main {
 			}
 
 			span.finish();
-			
+
 			return cart;
 		});
 
@@ -281,7 +283,7 @@ public class Main {
 		return location;
 	}
 
-	private static String addToCart(String id, String data) {
+	private static String addToCart(String id, String data, Tracer tracer, Span span) {
 		StringBuilder buffer = new StringBuilder();
 
 		DefaultHttpClient httpClient = null;
@@ -293,6 +295,21 @@ public class Main {
 
 			httpClient = new DefaultHttpClient(httpParams);
 			HttpPost postRequest = new HttpPost(CART_URL + id);
+
+			tracer.inject(span.context(), Format.Builtin.TEXT_MAP, new TextMap() {
+
+				@Override
+				public void put(String key, String value) {
+					postRequest.addHeader(key, value);
+				}
+
+				@Override
+				public Iterator<Map.Entry<String, String>> iterator() {
+					throw new UnsupportedOperationException(
+							"TextMapInjectAdapter should only be used with Tracer.inject()");
+				}
+			});
+
 			StringEntity payload = new StringEntity(data);
 			payload.setContentType("application/json");
 			postRequest.setEntity(payload);

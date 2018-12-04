@@ -13,8 +13,8 @@ var global = global || window;
       pageLoadTransactionName: "first-page-load",
       distributedTracing: true,
       distributedTracingOrigins: [],
-      pageLoadTraceId: "123",
-      pageLoadSpanId: "456",
+      // pageLoadTraceId: "123",
+      // pageLoadSpanId: "456",
       pageLoadSampled: true
     });
 
