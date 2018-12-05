@@ -222,7 +222,7 @@ public class Main {
 		// add headers
 		HttpServletResponse raw = res.raw();
 		for (String key : raw.getHeaderNames()) {
-			span.setTag("resp:" + key, raw.getHeader(key));
+			span.setTag("resp_" + key, raw.getHeader(key));
 		}
 
 		span.finish();
@@ -251,7 +251,7 @@ public class Main {
 
 		// add headers
 		for (String key : rawHeaders) {
-			spanBuilder.withTag("req:" + key, req.headers(key));
+			spanBuilder.withTag("req_" + key, req.headers(key));
 		}
 
 		spanBuilder.withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER);
