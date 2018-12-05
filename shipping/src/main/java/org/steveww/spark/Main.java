@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.commons.dbutils.DbUtils;
 import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.dbutils.handlers.MapListHandler;
@@ -38,6 +40,7 @@ import io.opentracing.propagation.TextMap;
 import io.opentracing.propagation.TextMapExtractAdapter;
 import io.opentracing.tag.Tags;
 import spark.Request;
+import spark.Response;
 import spark.Spark;
 
 @SuppressWarnings("deprecation")
@@ -83,7 +86,7 @@ public class Main {
 		Spark.get("/count", (req, res) -> {
 			String data;
 
-			Span span = startServerSpan(tracer, req, "/count").span();
+			Scope scope = startServerSpan(tracer, req, "/count");
 
 			try {
 
@@ -95,7 +98,7 @@ public class Main {
 				res.status(500);
 				data = "ERROR";
 			} finally {
-				span.finish();
+				finish(scope, res);
 			}
 
 			return data;
@@ -104,7 +107,7 @@ public class Main {
 		Spark.get("/codes", (req, res) -> {
 			String data;
 
-			Span span = startServerSpan(tracer, req, "/codes").span();
+			Scope scope = startServerSpan(tracer, req, "/codes");
 
 			try {
 
@@ -116,7 +119,7 @@ public class Main {
 				res.status(500);
 				data = "ERROR";
 			} finally {
-				span.finish();
+				finish(scope, res);
 			}
 
 			return data;
@@ -126,7 +129,7 @@ public class Main {
 		Spark.get("/cities/:code", (req, res) -> {
 			String data = "";
 
-			Span span = startServerSpan(tracer, req, "/cities/:code").span();
+			Scope scope = startServerSpan(tracer, req, "/cities/:code");
 
 			try {
 
@@ -138,7 +141,7 @@ public class Main {
 				res.status(500);
 				data = "ERROR";
 			} finally {
-				span.finish();
+				finish(scope, res);
 			}
 
 			return data;
@@ -147,7 +150,7 @@ public class Main {
 		Spark.get("/match/:code/:text", (req, res) -> {
 			String data;
 
-			Span span = startServerSpan(tracer, req, "/match/:code/:text").span();
+			Scope scope = startServerSpan(tracer, req, "/match/:code/:text");
 
 			try {
 				String query = "select uuid, name from cities where country_code = ? and city like ? order by name asc limit 10";
@@ -159,7 +162,7 @@ public class Main {
 				res.status(500);
 				data = "ERROR";
 			} finally {
-				span.finish();
+				finish(scope, res);
 			}
 
 			return data;
@@ -167,7 +170,7 @@ public class Main {
 
 		Spark.get("/calc/:uuid", (req, res) -> {
 
-			Span span = startServerSpan(tracer, req, "/calc/:uuid").span();
+			Scope scope = startServerSpan(tracer, req, "/calc/:uuid");
 
 			double homeLat = 51.164896;
 			double homeLong = 7.068792;
@@ -186,17 +189,17 @@ public class Main {
 				res.status(500);
 			}
 
-			span.finish();
+			finish(scope, res);
 
 			return new Gson().toJson(ship);
 		});
 
 		Spark.post("/confirm/:id", (req, res) -> {
 
-			Span span = startServerSpan(tracer, req, "/confirm/:id").span();
+			Scope scope = startServerSpan(tracer, req, "/confirm/:id");
 
 			logger.info("confirm " + req.params(":id") + " - " + req.body());
-			String cart = addToCart(req.params(":id"), req.body(), tracer, span);
+			String cart = addToCart(req.params(":id"), req.body(), tracer, scope.span());
 			logger.info("new cart " + cart);
 
 			if (cart.equals("")) {
@@ -205,12 +208,24 @@ public class Main {
 				res.header("Content-Type", "application/json");
 			}
 
-			span.finish();
+			finish(scope, res);
 
 			return cart;
 		});
 
 		logger.info("Ready");
+	}
+
+	private static void finish(Scope scope, Response res) {
+		Span span = scope.span();
+
+		// add headers
+		HttpServletResponse raw = res.raw();
+		for (String key : raw.getHeaderNames()) {
+			span.setTag("resp:" + key, raw.getHeader(key));
+		}
+
+		span.finish();
 	}
 
 	private static Scope startServerSpan(Tracer tracer, Request req, String operationName) {
@@ -233,7 +248,15 @@ public class Main {
 		} catch (IllegalArgumentException e) {
 			spanBuilder = tracer.buildSpan(operationName);
 		}
-		return spanBuilder.withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER).startActive(true);
+
+		// add headers
+		for (String key : rawHeaders) {
+			spanBuilder.withTag("req:" + key, req.headers(key));
+		}
+
+		spanBuilder.withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER);
+
+		return spanBuilder.startActive(true);
 	}
 
 	/**
