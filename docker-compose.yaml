@@ -113,7 +113,7 @@ services:
         condition: on-failure
     # environment:
       # - ELASTIC_APM_SERVICE_NAME=shipping-java
-      # - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_SERVER_URL=http://apm-server-apm-lab:8200
       # - ELASTIC_APM_LOG_LEVEL=debug
       # - ELASTIC_APM_APPLICATION_PACKAGES=org.steveww.spark
       # - ELASTIC_APM_ACTIVE=true
@@ -191,18 +191,18 @@ services:
   # ELK stack
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_TAG}
-    container_name: elasticsearch
+    container_name: elasticsearch-apm-lab
     ports: ['9200:9200']
     networks: ['robot-shop']
   kibana:
     image: docker.elastic.co/kibana/kibana:${ELK_TAG}
-    container_name: kibana
+    container_name: kibana-apm-lab
     ports: ['5601:5601']
     networks: ['robot-shop']
     depends_on: ['elasticsearch']
   apm-server:
     image: docker.elastic.co/apm/apm-server:${ELK_TAG}
-    container_name: apm_server
+    container_name: apm-server-apm-lab
     ports: ['8200:8200']
     networks: ['robot-shop']
     command: -E "apm-server.rum.enabled=true" -E "apm-server.rum.rate_limit=10" -E "apm-server.rum.allow_origins=['*']" -E "apm-server.rum.library_pattern='node_modules|bower_components|~'" -E "apm-server.rum.exclude_from_grouping='^/webpack'" -E "apm-server.rum.source_mapping.cache.expiration=5m" -E "apm-server.rum.source_mapping.index_pattern='apm-*-sourcemap*'" --strict.perms=false -e  # -e flag to log to stderr and disable syslog/file output
