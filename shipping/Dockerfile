@@ -27,10 +27,10 @@ ENV DB_HOST=mysql
 
 COPY --from=build /opt/shipping/target/shipping-1.0-jar-with-dependencies.jar shipping.jar
 
-COPY lib/elastic-apm-agent-1.1.0.jar elastic-apm-agent-1.1.0.jar
+COPY lib/elastic-apm-agent-1.3.0.jar elastic-apm-agent-1.3.0.jar
 
 CMD [ "java", \
-      "-javaagent:elastic-apm-agent-1.1.0.jar", \
+      "-javaagent:elastic-apm-agent-1.3.0.jar", \
       "-Delastic.apm.service_name=shipping-java", \
       "-Delastic.apm.application_packages=org.steveww.spark", \
 #      "-Delastic.apm.log_level=debug", \
